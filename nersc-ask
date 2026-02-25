@@ -1,0 +1,36 @@
+#!/bin/bash
+# NERSC Multi-Source Q&A - Simple wrapper for users
+# Automatically searches Google Docs and Slack
+
+# Determine installation directory
+if [ -z "$DOE_METRICS_INSTALL_DIR" ]; then
+    INSTALL_DIR="/global/common/software/nersc/google-docs-qa"
+else
+    INSTALL_DIR="$DOE_METRICS_INSTALL_DIR"
+fi
+
+# Load Python if not loaded
+if ! command -v python &> /dev/null; then
+    module load python/3.11 2>/dev/null
+fi
+
+# Check for first-time Google auth
+if [ ! -f ~/token.json ] && [ ! -f ./token.json ]; then
+    echo "================================================"
+    echo "First Time Google Authentication Required"
+    echo "================================================"
+    echo ""
+    echo "Run this once to authenticate with Google:"
+    echo "  python $INSTALL_DIR/test_google_docs.py"
+    echo ""
+    exit 1
+fi
+
+# Run multi-source Q&A
+if [ $# -eq 0 ]; then
+    # Interactive mode
+    python "$INSTALL_DIR/multi_ask.py"
+else
+    # Single question mode
+    python "$INSTALL_DIR/multi_ask.py" "$@"
+fi

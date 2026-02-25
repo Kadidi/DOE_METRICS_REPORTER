@@ -1,0 +1,148 @@
+# Multi-Source Configuration for NERSC
+# Define documents and Slack channels that users can query
+
+# SF API Configuration
+
+#Data sources
+
+gmail_filters:
+  - name: "NERSC Outage Reports"
+    query: "subject:(SWO OR perlmutter OR doudna OR HPSS OR CFS OR maintenance OR outage)"
+    category: "incidents"
+    keywords:
+      - why
+      - root cause
+      - rca
+      - cause
+      - explain
+      - what happened
+      - outage
+      - swo
+    description: "NERSC system outage and RCA emails from mailing lists"
+    days_back: 30
+    
+sfapi:
+  enabled: true
+  keywords:
+    - perlmutter
+    - nersc
+    - status
+    - outage
+    - swo
+    - system wide
+    - maintenance
+    - planned
+    - unplanned
+
+
+google_docs:
+  # NERSC Downtimes and Incidents
+  - id: "1rus_ZvsEctYG0dRSq7vePU6lD72OrnOtc-WWfiMyuX8"
+    name: "NERSC Downtimes (Sept-Dec)"
+    category: "incidents"
+    keywords:
+      - downtime
+      - outage
+      - incident
+      - perlmutter
+      - maintenance
+      - unplanned
+      - planned
+      - login nodes
+      - batch system
+    description: "Perlmutter downtimes from September through December"
+
+  # Add more documents here as needed
+  # Example:
+  # - id: "another_document_id"
+  #   name: "System Documentation"
+  #   category: "documentation"
+  #   keywords:
+  #     - documentation
+  #     - guide
+  #     - howto
+  #     - manual
+  #   description: "NERSC system documentation and guides"
+
+  # - id: "yet_another_id"
+  #   name: "Meeting Notes"
+  #   category: "meetings"
+  #   keywords:
+  #     - meeting
+  #     - notes
+  #     - discussion
+  #     - action items
+  #   description: "Team meeting notes and action items"
+
+# Slack channels to query
+slack_channels:
+  - name: "fire"
+    category: "incidents"
+    keywords:
+      - incident
+      - outage
+      - downtime
+      - emergency
+      - critical
+      - fire
+      - issue
+    description: "System incidents and outages channel"
+
+  - name: "general"
+    category: "general"
+    keywords:
+      - general
+      - announcement
+      - meeting
+      - event
+    description: "General NERSC announcements and discussion"
+
+  - name: "hpcpoc"
+    category: "hpc"
+    keywords:
+      - perlmutter
+      - hpc
+      - compute
+      - performance
+    description: "HPC and Perlmutter discussion"
+
+# Search strategy
+search_strategy:
+  sources:
+    - sfapi
+    - google_docs
+    - slack
+  mode: "smart"
+  max_per_source: 2
+  slack_days_back: 7
+  slack_max_messages: 10
+  default_category: "incidents"
+
+  # NEW: Priority rules - defines source ORDER based on question type
+  priority_rules:
+    - name: "realtime_status"
+      keywords: [status, active, down, degraded, available, unavailable, running, offline]
+      source_order: [sfapi, slack, google_docs]
+      stop_if_sfapi_definitive: true   # skip other sources if SF API answers clearly
+
+    - name: "historical_outages"
+      keywords: [downtime, incident, happened, history, last week, december, september, when did]
+      source_order: [google_docs, slack, sfapi]
+
+    - name: "maintenance_planned"
+      keywords: [planned, maintenance, scheduled, window, upcoming, swo, system wide]
+      source_order: [sfapi, google_docs, slack]
+
+    - name: "team_discussion"
+      keywords: [meeting, announcement, event, general, poc]
+      source_order: [slack, google_docs]
+      skip_sources: [sfapi]
+    - name: "root_cause_analysis"
+      keywords: [why, root cause, rca, cause, explain, explanation, what happened, reason, because, investigation, post-mortem, postmortem]
+      source_order: [sfapi, gmail, slack]   # gmail placeholder for when you build it
+      strategy: "chain"                      # different from regular priority — use SF API output to INFORM the next query
+      chain_behavior:
+        step1: sfapi                         # get outage brief description
+        step2: [gmail, slack]                # use SF API result to search for full explanation
+        step2_query_template: "outage {system} {date} explanation root cause"  # enrich the query
+      skip_sources_if_unavailable: [gmail]   # gracefully skip gmail until integration is built 
