@@ -22,13 +22,13 @@ DOE_METRICS_REPORTER enables system administrators and analysts to:
 - ✅ Batch report generation (incidents, metrics, jobs)
 
 ### Phase 2: System Metrics & Jobs
-- ⏳ Elasticsearch integration (CPU/GPU/memory utilization)
-- ⏳ SLURM sacct server (job analysis and queue metrics)
+-  Elasticsearch integration (CPU/GPU/memory utilization)
+-  SLURM sacct server (job analysis and queue metrics)
 
 ### Phase 3: Enterprise Integration
-- ⏳ ServiceNow incidents API
-- ⏳ Gmail query integration
-- ⏳ IRIS portal for job metadata
+-  ServiceNow incidents API
+-  Gmail query integration
+-  IRIS portal for job metadata
 
 ### Future Enhancements
 - Web UI dashboard (like APEXA's web_server.py)
