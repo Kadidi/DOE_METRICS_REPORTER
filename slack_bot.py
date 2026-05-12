@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Slack bot that answers questions using the existing multi-source agent."""
+"""Slack bot that answers questions using the agentic multi-source agent."""
 
 import os
 import re
 import time
 from typing import Optional
 
+from dotenv import load_dotenv
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from slack_sdk.socket_mode import SocketModeClient
@@ -13,7 +14,11 @@ from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
 
 from config import get_slack_token
-from multi_ask import multi_ask, HAS_ANTHROPIC, get_ai_api_key
+
+# ── NEW: import agent_ask instead of multi_ask ───────────────────────────────
+from agent_ask import agent_ask
+
+load_dotenv()
 
 
 def get_app_token() -> Optional[str]:
@@ -25,59 +30,9 @@ def clean_question(text: str, bot_user_id: str) -> str:
     """Strip mention and normalize user question text."""
     if not text:
         return ""
-
-    # Remove bot mention like <@U123ABC>
     text = re.sub(rf"<@{re.escape(bot_user_id)}>", "", text)
-
-    # Remove other mentions/extra whitespace
     text = re.sub(r"<@[^>]+>", "", text)
     return text.strip()
-
-
-def format_agent_answer(result: dict) -> str:
-    """Format multi_ask result to concise Slack output."""
-    lines = []
-
-    # SF API results (show first - usually most relevant for status questions)
-    sfapi = result["sources"].get("sfapi", {})
-    if sfapi.get("searched") and sfapi.get("results"):
-        lines.append("*NERSC Systems*")
-        for item in sfapi["results"][:2]:
-            if "error" in item:
-                lines.append(f"- Error: {item['error']}")
-            else:
-                answer = str(item.get("answer", "")).strip()
-                # SF API answers already have formatting, use as-is but limit length
-                if len(answer) > 500:
-                    answer = answer[:500] + "..."
-                lines.append(answer)
-
-    # Google Docs results
-    docs = result["sources"].get("google_docs", {})
-    if docs.get("searched") and docs.get("results"):
-        lines.append("*Google Docs*")
-        for item in docs["results"][:2]:
-            if "error" in item:
-                lines.append(f"- {item['document']}: {item['error']}")
-            else:
-                answer = str(item["answer"]).strip().replace("\n", " ")
-                lines.append(f"- {item['document']}: {answer[:300]}")
-
-    # Slack results
-    slack = result["sources"].get("slack", {})
-    if slack.get("searched") and slack.get("results"):
-        lines.append("*Slack*")
-        for item in slack["results"][:2]:
-            if "error" in item:
-                lines.append(f"- Error: {item['error']}")
-            else:
-                summary = item.get("summary", "").strip().replace("\n", " ")
-                lines.append(f"- #{item['channel']}: {summary[:300]}")
-
-    if not lines:
-        return "I couldn't find matching results in the configured sources."
-
-    return "\n".join(lines)
 
 
 def should_reply(event: dict, bot_user_id: str) -> bool:
@@ -119,11 +74,10 @@ def run_bot() -> None:
     bot_user_id = auth["user_id"]
     bot_name = auth.get("user", "agent")
 
+    provider = os.getenv("LLM_PROVIDER", "openai").upper()
     print(f"Slack bot online as {bot_name} ({bot_user_id})")
-    print(f"Sources: Google Docs, Slack, SF API")
-    
-    if not (HAS_ANTHROPIC and get_ai_api_key()):
-        print("Warning: ANTHROPIC_API_KEY/CBORG_API_KEY not set; using keyword mode")
+    print(f"LLM provider: {provider}")
+    print("Sources: SF API, Slack, Gmail, Google Docs, utilization-calculation")
 
     socket_client = SocketModeClient(app_token=app_token, web_client=web_client)
 
@@ -131,7 +85,7 @@ def run_bot() -> None:
         if req.type != "events_api":
             return
 
-        # Ack quickly to avoid retries
+        # Ack quickly to avoid Slack retries
         client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
 
         payload = req.payload
@@ -139,10 +93,8 @@ def run_bot() -> None:
         print(
             "Received event:",
             event.get("type"),
-            "channel_type=",
-            event.get("channel_type"),
-            "user=",
-            event.get("user"),
+            "channel_type=", event.get("channel_type"),
+            "user=", event.get("user"),
         )
 
         if not should_reply(event, bot_user_id):
@@ -150,8 +102,6 @@ def run_bot() -> None:
             return
 
         channel = event.get("channel")
-        # Reply in-thread only when the message is already threaded.
-        # For top-level mentions, respond in-channel for visibility.
         thread_ts = event.get("thread_ts")
         question = clean_question(event.get("text", ""), bot_user_id)
 
@@ -163,14 +113,17 @@ def run_bot() -> None:
                 web_client.chat_postMessage(
                     channel=channel,
                     thread_ts=thread_ts,
-                    text="Ask me a question after mentioning me, and I will search Google Docs, Slack, and NERSC SF API.",
+                    text=(
+                        "Ask me a question and I'll search SF API, Slack, Gmail, "
+                        "Google Docs, and utilization data to find the answer."
+                    ),
                 )
             except Exception:
                 pass
             return
 
+        # Add thinking indicator
         try:
-            # Add thinking indicator
             web_client.reactions_add(
                 channel=channel,
                 name="hourglass_flowing_sand",
@@ -180,32 +133,24 @@ def run_bot() -> None:
             pass
 
         try:
-            result = multi_ask(question, verbose=False)
-            answer = format_agent_answer(result)
+            # ── NEW: agent_ask returns a plain string answer ─────────────────
+            # verbose=False suppresses reasoning steps from printing to terminal
+            answer = agent_ask(question, verbose=False)
+
+            # Slack has a 4000 char limit per message — truncate if needed
+            if len(answer) > 3900:
+                answer = answer[:3900] + "\n\n_(truncated — ask a more specific question)_"
 
             web_client.chat_postMessage(
                 channel=channel,
                 thread_ts=thread_ts,
                 text=answer,
             )
-            print("Reply posted to channel", channel)
-            
-            # Remove thinking indicator
-            try:
-                web_client.reactions_remove(
-                    channel=channel,
-                    name="hourglass_flowing_sand",
-                    timestamp=event.get("ts")
-                )
-            except Exception:
-                pass
-                
+            print(f"Reply posted to channel {channel}")
+
         except SlackApiError as e:
             err = getattr(e, "response", None)
-            if err is not None:
-                print(f"Slack API error: {err.get('error', e)}")
-            else:
-                print(f"Slack API error: {e}")
+            print(f"Slack API error: {err.get('error', e) if err else e}")
         except Exception as e:
             print(f"Agent error: {e}")
             try:
@@ -213,6 +158,16 @@ def run_bot() -> None:
                     channel=channel,
                     thread_ts=thread_ts,
                     text=f"I hit an error while answering: {e}",
+                )
+            except Exception:
+                pass
+        finally:
+            # Always remove thinking indicator
+            try:
+                web_client.reactions_remove(
+                    channel=channel,
+                    name="hourglass_flowing_sand",
+                    timestamp=event.get("ts")
                 )
             except Exception:
                 pass

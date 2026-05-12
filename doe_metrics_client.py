@@ -19,6 +19,14 @@ from dotenv import load_dotenv
 
 from cache import CacheManager
 from models import Incident, SlackMessage, UtilizationMetric, Job
+from multi_ask import multi_ask
+from llm_summary import summarize_query_results
+from utilization_backend import (
+    UtilizationReportError,
+    UtilizationRequest,
+    choose_report_mode,
+    run_utilization_report,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -177,19 +185,113 @@ class DOEMetricsClient:
         cached = self.cache.get("combined_query", query_text)
         if cached:
             results["cached_results"] = 1
-            return {**results, "results": cached["data"], "cache_hit": True}
+            cached_data = cached["data"]
+            if isinstance(cached_data, dict) and "results" in cached_data:
+                return {
+                    **results,
+                    "results": cached_data.get("results", {}),
+                    "summary": cached_data.get("summary"),
+                    "cache_hit": True,
+                }
+            return {**results, "results": cached_data, "cache_hit": True}
 
-        # Query each available server (simplified for demonstration)
-        for server_name, server in self.servers.items():
-            logger.debug(f"Querying {server_name}...")
-            # In production, would parse query and call appropriate server tools
-            results["servers_queried"].append(server_name)
+        # Route the query through the working multi-source Q&A path.
+        try:
+            qa_results = multi_ask(query_text, verbose=False)
+            results["servers_queried"] = [
+                source_name
+                for source_name, source_result in qa_results.get("sources", {}).items()
+                if source_result.get("searched")
+            ]
+            results["results"] = qa_results
+            results["summary"] = summarize_query_results(query_text, qa_results)
+
+            for source_result in qa_results.get("sources", {}).values():
+                results["total_results"] += len(source_result.get("results", []))
+        except Exception as e:
+            logger.error(f"Error executing multi-source query: {e}")
+            results["error"] = str(e)
+            results["cache_hit"] = False
+            return results
 
         # Cache the results
-        self.cache.set("combined_query", query_text, results["results"], ttl_hours=2)
+        self.cache.set(
+            "combined_query",
+            query_text,
+            {"results": results["results"], "summary": results.get("summary")},
+            ttl_hours=2,
+        )
 
         results["cache_hit"] = False
         return results
+
+    def _print_query_result(self, result: Dict[str, Any]):
+        """Render query results in a readable form."""
+        if result.get("error"):
+            print(f"Error: {result['error']}")
+            return
+
+        if result.get("cache_hit"):
+            print("(cached result)")
+
+        if result.get("summary"):
+            print("\nAI Summary:")
+            print(result["summary"])
+
+        query_results = result.get("results", {})
+        routing = query_results.get("routing", {})
+        if routing:
+            print("\nQuery Debug:")
+            matched_rule = routing.get("matched_rule") or "(default)"
+            source_order = " -> ".join(routing.get("source_order", []))
+            print(f"  Rule: {matched_rule}")
+            print(f"  Source order: {source_order}")
+            selected_docs = routing.get("selected_google_docs", [])
+            if selected_docs:
+                print(f"  Google Docs queried: {', '.join(selected_docs)}")
+            selected_channels = routing.get("selected_slack_channels", [])
+            if selected_channels:
+                print(f"  Slack channels queried: {', '.join('#' + name for name in selected_channels)}")
+
+        sources = query_results.get("sources", {})
+        if not sources:
+            print(json.dumps(result, indent=2))
+            return
+
+        printed_any = False
+
+        sfapi_results = sources.get("sfapi", {}).get("results", [])
+        if sfapi_results:
+            printed_any = True
+            print("\nNERSC SF API:")
+            for entry in sfapi_results:
+                if entry.get("error"):
+                    print(f"  Error: {entry['error']}")
+                else:
+                    print(f"  {entry.get('answer', 'No answer')}")
+
+        google_results = sources.get("google_docs", {}).get("results", [])
+        if google_results:
+            printed_any = True
+            print("\nGoogle Docs:")
+            for entry in google_results:
+                if entry.get("error"):
+                    print(f"  {entry.get('document', 'Document')}: {entry['error']}")
+                else:
+                    print(f"  {entry.get('document', 'Document')}: {entry.get('answer', 'No answer')}")
+
+        slack_results = sources.get("slack", {}).get("results", [])
+        if slack_results:
+            printed_any = True
+            print("\nSlack:")
+            for entry in slack_results:
+                if entry.get("error"):
+                    print(f"  Error: {entry['error']}")
+                else:
+                    print(f"  #{entry.get('channel', 'unknown')}: {entry.get('summary', 'No results')}")
+
+        if not printed_any:
+            print("No answers were returned for that query.")
 
     async def create_batch_report(
         self,
@@ -283,6 +385,50 @@ class DOEMetricsClient:
 
     async def _generate_metrics_report(self, output_format: str) -> str:
         """Generate metrics/utilization report."""
+        resource = "cpu" if "cpu" in [k.lower() for k in self.context.keywords] else "gpu"
+        compare_with_gabor = any(
+            "gabor" in keyword.lower() or "gmail" in keyword.lower()
+            for keyword in self.context.keywords
+        )
+
+        try:
+            mode, report_date = choose_report_mode(
+                self.context.date_from,
+                self.context.date_to,
+            )
+            report_data = run_utilization_report(
+                UtilizationRequest(
+                    mode=mode,
+                    date=report_date,
+                    resource=resource,
+                    compare_with_gabor=compare_with_gabor and mode == "day",
+                )
+            )
+        except UtilizationReportError as e:
+            if output_format == "json":
+                return json.dumps(
+                    {
+                        "title": "System Utilization Report",
+                        "error": str(e),
+                        "period": {
+                            "from": self.context.date_from.isoformat()
+                            if self.context.date_from
+                            else None,
+                            "to": self.context.date_to.isoformat() if self.context.date_to else None,
+                        },
+                        "generated_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                    indent=2,
+                )
+            return "\n".join(
+                [
+                    "# System Utilization Report",
+                    f"**Period:** {self.context.date_from} to {self.context.date_to}",
+                    "",
+                    f"Error: {e}",
+                ]
+            )
+
         if output_format == "json":
             return json.dumps(
                 {
@@ -293,31 +439,98 @@ class DOEMetricsClient:
                         else None,
                         "to": self.context.date_to.isoformat() if self.context.date_to else None,
                     },
-                    "systems": ["perlmutter", "archive", "dtn"],
-                    "metrics": [],
+                    "systems": ["perlmutter"],
+                    "resource": resource,
+                    "mode": report_data["mode"],
+                    "our_logic": report_data["our_logic"],
+                    "reference_logic": report_data["reference_logic"],
+                    "comparison": report_data.get("comparison"),
+                    "gabor_comparison": report_data.get("gabor_comparison"),
+                    "source": report_data["source"],
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                 },
                 indent=2,
             )
         else:  # markdown
-            return "\n".join(
-                [
-                    "# System Utilization Report",
-                    f"**Period:** {self.context.date_from} to {self.context.date_to}",
-                    "",
-                    "## Perlmutter",
-                    "- CPU: 75% avg",
-                    "- GPU: 82% avg",
-                    "- Memory: 68% avg",
-                    "",
-                    "## Archive",
-                    "- Utilization: 45% avg",
-                    "",
-                    "## Data Transfer Nodes",
-                    "- Network I/O: 2.3 TB/hour avg",
-                    "",
-                ]
-            )
+            lines = [
+                "# System Utilization Report",
+                f"**Period:** {self.context.date_from} to {self.context.date_to}",
+                f"**Resource:** {resource.upper()}",
+                f"**Mode:** {report_data['mode']}",
+                f"**Source:** {report_data['source']}",
+                "",
+            ]
+
+            our_summary = report_data["our_logic"].get("summary")
+            ref_summary = report_data["reference_logic"].get("summary")
+            cmp_summary = report_data.get("comparison", {}).get("summary")
+            if our_summary:
+                lines.extend(
+                    [
+                        "## DOE Logic Summary",
+                        f"- Utilization: {our_summary.get('utilization_pct', 0):.2f}%",
+                        f"- Host count: {our_summary.get('host_count', 0)}",
+                        "",
+                    ]
+                )
+            if ref_summary:
+                lines.extend(
+                    [
+                        "## Reference Summary",
+                        f"- Utilization: {ref_summary.get('utilization_pct', 0):.2f}%",
+                        f"- Host count: {ref_summary.get('host_count', 0)}",
+                        "",
+                    ]
+                )
+            if cmp_summary:
+                lines.extend(
+                    [
+                        "## DOE vs Reference",
+                        f"- Absolute difference: {cmp_summary.get('absolute_difference_pct_points', 0):.2f} percentage points",
+                        (
+                            f"- Relative difference: {cmp_summary.get('relative_difference_pct', 0):.2f}%"
+                            if cmp_summary.get("relative_difference_pct") is not None
+                            else "- Relative difference: n/a"
+                        ),
+                        "",
+                    ]
+                )
+
+            if report_data["mode"] == "day":
+                lines.append("## Daily Rows")
+            else:
+                lines.append("## Monthly Rows")
+            for row in report_data["comparison"]["rows"]:
+                label = row.get("date") or row.get("month")
+                rel = row.get("relative_difference_pct")
+                rel_text = "n/a" if rel is None else f"{rel:.2f}%"
+                lines.append(
+                    f"- {label} {row['hostname']}: DOE={row['our_utilization_pct']:.2f}% "
+                    f"reference={row['reference_utilization_pct']:.2f}% "
+                    f"diff={row['absolute_difference_pct_points']:.2f} pts ({rel_text})"
+                )
+            comparison = report_data.get("gabor_comparison")
+            if comparison:
+                lines.append("")
+                lines.append("## Gabor Comparison")
+                if comparison.get("error"):
+                    lines.append(f"- {comparison['error']}")
+                else:
+                    lines.append(
+                        f"- Gmail value: {comparison['gmail_utilization_pct']:.2f}% "
+                        f"for {comparison['hostname']}"
+                    )
+                    lines.append(
+                        f"- Our value: {comparison['our_utilization_pct']:.2f}%"
+                    )
+                    lines.append(
+                        f"- Absolute difference: {comparison['absolute_difference_pct_points']:.2f} percentage points"
+                    )
+                    rel = comparison.get("relative_difference_pct")
+                    if rel is not None:
+                        lines.append(f"- Relative difference: {rel:.2f}%")
+            lines.append("")
+            return "\n".join(lines)
 
     async def _generate_jobs_report(self, output_format: str) -> str:
         """Generate jobs analysis report."""
@@ -414,7 +627,7 @@ Examples:
     async def interactive_mode(self):
         """Run interactive CLI loop."""
         print("\nDOE_METRICS_REPORTER - Interactive Mode")
-        print("Type 'help' for commands\n")
+        print("Ask a question directly, or type 'help' for commands\n")
 
         self.running = True
         while self.running:
@@ -443,7 +656,7 @@ Examples:
                         print("Usage: query <query_text>")
                     else:
                         result = await self.execute_query(args)
-                        print(json.dumps(result, indent=2))
+                        self._print_query_result(result)
                 elif command == "cache":
                     subcommand = args.split()[0] if args else ""
                     if subcommand == "status":
@@ -481,8 +694,8 @@ Examples:
                     report = await self.create_batch_report(theme="incidents")
                     print(report)
                 else:
-                    print(f"Unknown command: {command}")
-                    print("Type 'help' for available commands")
+                    result = await self.execute_query(user_input)
+                    self._print_query_result(result)
 
             except KeyboardInterrupt:
                 print("\nInterrupted. Type 'exit' to quit.")
