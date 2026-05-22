@@ -15,6 +15,45 @@ except ImportError:
     HAS_ANTHROPIC = False
     print("Warning: anthropic package not installed. Install with: pip install anthropic")
 
+def ask_llm(user_prompt, system_prompt=None, api_key=None, model=None, max_tokens=1024):
+    """Generic LLM call used by llm_summary.py.
+
+    This wrapper exists because llm_summary.py expects ask_document.py
+    to expose ask_llm(user_prompt, system_prompt=...).
+    """
+    if not HAS_ANTHROPIC:
+        return "Error: anthropic package not installed. Run: pip install anthropic"
+
+    if api_key is None:
+        api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("CBORG_API_KEY")
+
+    if not api_key:
+        return (
+            "Error: AI API key not set. Please set ANTHROPIC_API_KEY "
+            "or CBORG_API_KEY."
+        )
+
+    if model is None:
+        model = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+
+        kwargs = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": user_prompt}],
+        }
+
+        if system_prompt:
+            kwargs["system"] = system_prompt
+
+        message = client.messages.create(**kwargs)
+        return message.content[0].text
+
+    except Exception as e:
+        return f"Error calling AI API: {e}"
+
 
 def get_document_content(creds, doc_id):
     """Fetch the full text content of a Google Doc.

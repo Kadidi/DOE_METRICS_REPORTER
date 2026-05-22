@@ -151,51 +151,6 @@ Your job is to answer questions about NERSC system operations by querying the ri
 """
 
 
-
-def _to_openai_tool_schemas(tools):
-    """Convert Anthropic/MCP style tools to OpenAI compatible function tools."""
-    converted = []
-
-    for tool in tools:
-        # Already OpenAI compatible
-        if tool.get("type") == "function" and "function" in tool:
-            converted.append(tool)
-            continue
-
-        # Anthropic/MCP style: name, description, input_schema
-        if "name" in tool and "input_schema" in tool:
-            converted.append({
-                "type": "function",
-                "function": {
-                    "name": tool["name"],
-                    "description": tool.get("description", ""),
-                    "parameters": tool.get("input_schema", {
-                        "type": "object",
-                        "properties": {}
-                    }),
-                },
-            })
-            continue
-
-        converted.append(tool)
-
-    return converted
-
-def _filter_enabled_tools(tools):
-    """Only expose tools listed in ENABLED_TOOLS. If unset, expose all tools."""
-    enabled = os.getenv("ENABLED_TOOLS", "").strip()
-
-    if not enabled:
-        return tools
-
-    allowed = {name.strip() for name in enabled.split(",") if name.strip()}
-
-    def tool_name(tool):
-        if tool.get("type") == "function":
-            return tool.get("function", {}).get("name")
-        return tool.get("name")
-
-    return [tool for tool in tools if tool_name(tool) in allowed]
 # ---------------------------------------------------------------------------
 # ReAct agent loop
 # ---------------------------------------------------------------------------
@@ -217,7 +172,6 @@ def agent_ask(question: str, verbose: bool = True, max_steps: int = 8) -> str:
     """
     from tools import TOOL_SCHEMAS, execute_tool
 
-    tool_schemas = _to_openai_tool_schemas(TOOL_SCHEMAS)
     client, model = _get_llm_client()
 
     if verbose:
@@ -244,7 +198,7 @@ def agent_ask(question: str, verbose: bool = True, max_steps: int = 8) -> str:
 
         response = client.chat.completions.create(
             model=model,
-            tools=tool_schemas,
+            tools=TOOL_SCHEMAS,
             tool_choice="auto",
             messages=messages
         )
