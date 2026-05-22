@@ -2,7 +2,7 @@ cd ~/MAGENT
 git switch mayur/agent-updates
 git status
 git add .
-git commit -m "your message"
+git commit -m "updates"
 git push
 
 
