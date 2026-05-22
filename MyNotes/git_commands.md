@@ -15,7 +15,7 @@ Use this guide when working from Perlmutter or another remote machine.
 Run this from your local terminal.
 
 ```bash
-ssh maddy@perlmutter.nersc.gov
+ssh username@perlmutter.nersc.gov
 ```
 
 Go to your home directory.
@@ -29,7 +29,7 @@ cd ~
 Run this one time on the machine.
 
 ```bash
-git config --global user.name "Mayur"
+git config --global user.name "username"
 git config --global user.email "your_github_email@example.com"
 ```
 
@@ -156,8 +156,8 @@ Hi <github-username>! You've successfully authenticated, but GitHub does not pro
 
 ```bash
 cd ~
-git clone git@github.com:Kadidi/DOE_METRICS_REPORTER.git MAGENT
-cd ~/MAGENT
+git clone repo dest
+cd ~/dest
 ```
 
 Check that this is a Git repository.
@@ -178,7 +178,7 @@ git@github.com:Kadidi/DOE_METRICS_REPORTER.git
 Run this only one time when creating the branch.
 
 ```bash
-git switch -c mayur/agent-updates
+git switch -c new beanch
 ```
 
 Check the current branch.
@@ -201,22 +201,14 @@ After editing files:
 git status
 git add .
 git commit -m "Update agent code"
-git push -u origin mayur/agent-updates
+git push -u origin new branch
 ```
 
 The `-u` is needed only the first time. It connects your local branch to the GitHub branch.
 
 ## 11. Regular workflow after the branch already exists
 
-Every time later:
 
-```bash
-ssh maddy@perlmutter.nersc.gov
-cd ~/MAGENT
-git switch mayur/agent-updates
-git pull
-git status
-```
 
 After making code changes:
 
@@ -279,11 +271,7 @@ mv MAGENT MAGENT_updated_backup
 
 Clone the real repository.
 
-```bash
-git clone git@github.com:Kadidi/DOE_METRICS_REPORTER.git MAGENT
-cd ~/MAGENT
-git switch -c mayur/agent-updates
-```
+
 
 Copy your updated files into the real cloned repository.
 
@@ -297,7 +285,7 @@ Then commit and push.
 git status
 git add .
 git commit -m "Update agent code"
-git push -u origin mayur/agent-updates
+git push -u origin branch
 ```
 
 ## 14. Commands to avoid
@@ -311,13 +299,13 @@ git push origin main
 Do not create the same branch again.
 
 ```bash
-git switch -c mayur/agent-updates
+git switch -c branch
 ```
 
 Use this instead after the branch already exists.
 
 ```bash
-git switch mayur/agent-updates
+git switch branch
 ```
 
 ## 15. Create a Pull Request
@@ -331,20 +319,14 @@ https://github.com/Kadidi/DOE_METRICS_REPORTER
 Create a Pull Request from:
 
 ```text
-mayur/agent-updates → main
+branch-updates → main
 ```
 
 ## 16. Quick daily command set
 
 Use this when you simply want to continue working on your branch.
 
-```bash
-ssh maddy@perlmutter.nersc.gov
-cd ~/MAGENT
-git switch mayur/agent-updates
-git pull
-git status
-```
+
 
 After editing files:
 
