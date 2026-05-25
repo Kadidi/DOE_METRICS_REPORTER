@@ -42,7 +42,7 @@ echo "Starting MCP servers from registry..."
 echo ""
 
 # Parse servers.config and start servers
-while IFS='=' read -r name path; do
+while IFS=':' read -r name path; do
     # Skip comments and empty lines
     [[ "$name" =~ ^#.*$ ]] && continue
     [ -z "$name" ] && continue

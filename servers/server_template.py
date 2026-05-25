@@ -4,37 +4,14 @@ Copy this file and follow the pattern below to add new API integrations.
 """
 
 import logging
-from fastmcp import Server
-import os
+from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 
 # Create the MCP server instance
-server = Server("template_server")
+server = FastMCP("template_server")
 
 
-@server.list_tools()
-def list_tools() -> list:
-    """List available tools provided by this server."""
-    return [
-        {
-            "name": "template_tool",
-            "description": "A template tool that demonstrates the structure",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The query to execute",
-                    },
-                },
-                "required": ["query"],
-            },
-        },
-    ]
-
-
-@server.call_tool()
 async def call_tool(name: str, arguments: dict) -> str:
     """Execute a tool by name with given arguments.
 
@@ -55,6 +32,7 @@ async def call_tool(name: str, arguments: dict) -> str:
         return f"Error: {str(e)}"
 
 
+@server.tool(name="template_tool", description="A template tool that demonstrates the structure.")
 async def template_tool(query: str) -> str:
     """Example tool implementation.
 

@@ -2,101 +2,14 @@
 
 import json
 import logging
-import os
-from datetime import datetime, timedelta
-from fastmcp import Server
+
+from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 
-# Create the MCP server instance
-server = Server("slack_server")
+server = FastMCP("slack_server")
 
 
-def _get_slack_token() -> str:
-    """Get Slack bot token from environment."""
-    return os.getenv("SLACK_BOT_TOKEN", "")
-
-
-@server.list_tools()
-def list_tools() -> list:
-    """List available Slack tools."""
-    return [
-        {
-            "name": "list_channels",
-            "description": "List available Slack channels",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "include_archived": {
-                        "type": "boolean",
-                        "description": "Include archived channels (default: false)",
-                    },
-                },
-                "required": [],
-            },
-        },
-        {
-            "name": "query_channel_messages",
-            "description": "Search messages in a Slack channel",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "channel": {
-                        "type": "string",
-                        "description": "Channel name or ID",
-                    },
-                    "keywords": {
-                        "type": "string",
-                        "description": "Keywords to search for (comma-separated)",
-                    },
-                    "days_back": {
-                        "type": "integer",
-                        "description": "Search last N days (default: 7)",
-                    },
-                },
-                "required": ["channel", "keywords"],
-            },
-        },
-        {
-            "name": "get_message_thread",
-            "description": "Get full thread context for a Slack message",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "channel": {
-                        "type": "string",
-                        "description": "Channel name or ID",
-                    },
-                    "thread_ts": {
-                        "type": "string",
-                        "description": "Thread timestamp (parent message ts)",
-                    },
-                },
-                "required": ["channel", "thread_ts"],
-            },
-        },
-        {
-            "name": "search_mentions",
-            "description": "Find mentions of specific user or bot",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "user_or_bot": {
-                        "type": "string",
-                        "description": "Username or bot name to search for mentions",
-                    },
-                    "days_back": {
-                        "type": "integer",
-                        "description": "Search last N days (default: 7)",
-                    },
-                },
-                "required": ["user_or_bot"],
-            },
-        },
-    ]
-
-
-@server.call_tool()
 async def call_tool(name: str, arguments: dict) -> str:
     """Execute a Slack tool."""
     try:
@@ -123,6 +36,7 @@ async def call_tool(name: str, arguments: dict) -> str:
         return json.dumps({"error": str(e)})
 
 
+@server.tool(name="list_channels", description="List available Slack channels.")
 async def list_channels(include_archived: bool = False) -> str:
     """List available Slack channels.
 
@@ -165,6 +79,7 @@ async def list_channels(include_archived: bool = False) -> str:
     return json.dumps(result)
 
 
+@server.tool(name="query_channel_messages", description="Search messages in a Slack channel.")
 async def query_channel_messages(channel: str, keywords: str, days_back: int = 7) -> str:
     """Search for messages in a channel.
 
@@ -209,6 +124,7 @@ async def query_channel_messages(channel: str, keywords: str, days_back: int = 7
     return json.dumps(result)
 
 
+@server.tool(name="get_message_thread", description="Get full thread context for a Slack message.")
 async def get_message_thread(channel: str, thread_ts: str) -> str:
     """Get full thread for a message.
 
@@ -253,6 +169,7 @@ async def get_message_thread(channel: str, thread_ts: str) -> str:
     return json.dumps(result)
 
 
+@server.tool(name="search_mentions", description="Find mentions of a specific user or bot.")
 async def search_mentions(user_or_bot: str, days_back: int = 7) -> str:
     """Find mentions of a user or bot.
 

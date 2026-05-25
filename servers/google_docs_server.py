@@ -2,92 +2,14 @@
 
 import json
 import logging
-import os
-from typing import Optional
-from fastmcp import Server
+
+from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 
-# Create the MCP server instance
-server = Server("google_docs_server")
+server = FastMCP("google_docs_server")
 
 
-def _get_auth_headers() -> dict:
-    """Get Google API authentication headers."""
-    # In production, use OAuth flow with google-auth-oauthlib
-    # For now, return placeholder
-    api_key = os.getenv("GOOGLE_DOCS_API_KEY", "")
-    return {"Authorization": f"Bearer {api_key}"}
-
-
-@server.list_tools()
-def list_tools() -> list:
-    """List available Google Docs tools."""
-    return [
-        {
-            "name": "list_documents",
-            "description": "List accessible Google Docs in a folder",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "folder_id": {
-                        "type": "string",
-                        "description": "Google Drive folder ID (optional, uses root if omitted)",
-                    },
-                },
-                "required": [],
-            },
-        },
-        {
-            "name": "get_document_content",
-            "description": "Fetch full content of a Google Doc",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "doc_id": {
-                        "type": "string",
-                        "description": "Google Doc ID",
-                    },
-                },
-                "required": ["doc_id"],
-            },
-        },
-        {
-            "name": "search_document",
-            "description": "Search for keywords within a Google Doc",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "doc_id": {
-                        "type": "string",
-                        "description": "Google Doc ID",
-                    },
-                    "keywords": {
-                        "type": "string",
-                        "description": "Keywords to search for (comma-separated)",
-                    },
-                },
-                "required": ["doc_id", "keywords"],
-            },
-        },
-        {
-            "name": "list_shared_documents",
-            "description": "List documents shared with you",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Optional search query (e.g., incident, maintenance)",
-                    },
-                },
-                "required": [],
-            },
-        },
-    ]
-
-
-@server.call_tool()
 async def call_tool(name: str, arguments: dict) -> str:
     """Execute a Google Docs tool."""
     try:
@@ -111,6 +33,7 @@ async def call_tool(name: str, arguments: dict) -> str:
         return json.dumps({"error": str(e)})
 
 
+@server.tool(name="list_documents", description="List accessible Google Docs in a folder.")
 async def list_documents(folder_id: str = "root") -> str:
     """List Google Docs in a folder.
 
@@ -144,6 +67,7 @@ async def list_documents(folder_id: str = "root") -> str:
     return json.dumps(result)
 
 
+@server.tool(name="get_document_content", description="Fetch full content of a Google Doc.")
 async def get_document_content(doc_id: str) -> str:
     """Fetch full Google Doc content.
 
@@ -167,6 +91,7 @@ async def get_document_content(doc_id: str) -> str:
     return json.dumps(result)
 
 
+@server.tool(name="search_document", description="Search for keywords within a Google Doc.")
 async def search_document(doc_id: str, keywords: str) -> str:
     """Search for keywords in a Google Doc.
 
@@ -198,6 +123,7 @@ async def search_document(doc_id: str, keywords: str) -> str:
     return json.dumps(result)
 
 
+@server.tool(name="list_shared_documents", description="List documents shared with you.")
 async def list_shared_documents(query: str = "") -> str:
     """List documents shared with current user.
 
